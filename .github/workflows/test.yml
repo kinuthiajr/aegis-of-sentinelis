@@ -1,0 +1,61 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test-action:
+    name: Test Action Wrapper
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Dependencies & Build Action Bundle
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create Mock Package Lockfile
+        run: |
+          mkdir -p test-fixtures
+          cat << 'EOF' > test-fixtures/package-lock.json
+          {
+            "name": "integration-test-app",
+            "lockfileVersion": 3,
+            "packages": {
+              "": {
+                "name": "integration-test-app",
+                "version": "1.0.0"
+              },
+              "node_modules/clean-package": {
+                "version": "1.0.0",
+                "hasInstallScript": false
+              },
+              "node_modules/suspicious-package": {
+                "version": "2.1.0",
+                "hasInstallScript": true
+              }
+            }
+          }
+          EOF
+
+      - name: Run Sentinelis Action (Expected Detection)
+        uses: ./
+        continue-on-error: true
+        with:
+          version: "1.0.0"
+          target-path: "./test-fixtures"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          engine-repository: ${{ github.repository }}

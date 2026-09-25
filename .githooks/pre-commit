@@ -1,0 +1,17 @@
+#!/bin/sh
+
+echo "⚡ Running pre-commit hook: Rebuilding dist/index.js..."
+
+# 1. Run esbuild via your package.json script
+npm run build
+
+# Check if build succeeded
+if [ $? -ne 0 ]; then
+  echo "❌ Build failed! Aborting commit."
+  exit 1
+fi
+
+# 2. Stage the newly generated dist/ bundle into the current commit
+git add dist/index.js
+
+echo "✅ dist/index.js updated and staged."

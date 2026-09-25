@@ -1,0 +1,85 @@
+name: Release Engine Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-aot:
+    name: Build Native AOT (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            binary_name: Sentinelis.Cli
+            asset_name: Sentinelis.Cli-linux-x64
+          - os: macos-latest
+            target: osx-x64
+            binary_name: Sentinelis.Cli
+            asset_name: Sentinelis.Cli-osx-x64
+          - os: macos-latest
+            target: osx-arm64
+            binary_name: Sentinelis.Cli
+            asset_name: Sentinelis.Cli-osx-arm64
+          - os: windows-latest
+            target: win-x64
+            binary_name: Sentinelis.Cli.exe
+            asset_name: Sentinelis.Cli.exe-win-x64
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install C++ Linker Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Publish Native AOT Binary
+        run: |
+          dotnet publish engine/Sentinelis.Cli/Sentinelis.Cli.csproj \
+            -c Release \
+            -r ${{ matrix.target }} \
+            --self-contained true \
+            -o ./publish
+
+      - name: Stage Asset File
+        shell: bash
+        run: |
+          mv ./publish/${{ matrix.binary_name }} ./publish/${{ matrix.asset_name }}
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ./publish/${{ matrix.asset_name }}
+
+  create-release:
+    name: Publish GitHub Release
+    needs: build-aot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download All Native Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./release-assets/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,45 @@
+# ==========================================
+# Node.js / TypeScript (Action Wrapper)
+# ==========================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lib/
+*.tsbuildinfo
+
+# IMPORTANT: GitHub Actions requires 'dist/index.js' to be committed to Git 
+# so runners can execute it without running 'npm install'.
+# ONLY uncomment 'dist/' below if you build 'dist/' dynamically inside CI before running.
+# dist/
+
+# ==========================================
+# .NET / C# Engine
+# ==========================================
+[Bb]in/
+[Oo]bj/
+publish/
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+
+# ==========================================
+# Local Test Execution & Temp Artifacts
+# ==========================================
+tmp/
+temp/
+test-fixtures/
+*.log
+
+# ==========================================
+# OS & IDE Settings
+# ==========================================
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/

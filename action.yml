@@ -1,0 +1,26 @@
+name: 'Sentinelis Security Audit'
+description: 'Fast, Native AOT dependency security scanner for GitHub Actions.'
+author: 'Sentinelis'
+inputs:
+  version:
+    description: 'Version of the Sentinelis C# engine binary to fetch.'
+    required: false
+    default: '1.0.0'
+  target-path:
+    description: 'Directory path containing lockfiles to scan.'
+    required: false
+    default: '.'
+  github-token:
+    description: 'GitHub PAT or secrets.GITHUB_TOKEN to post PR comments.'
+    required: false
+    default: '${{ github.token }}'
+  engine-repository:
+    description: 'GitHub repository (owner/repo) hosting the engine releases.'
+    required: false
+    default: '${{ github.repository }}'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+branding:
+  icon: 'shield'
+  color: 'red'
