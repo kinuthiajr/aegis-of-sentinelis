@@ -43,6 +43,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
 
       - name: Publish Native AOT Binary
+        shell: bash
         run: |
           dotnet publish engine/Sentinelis.Cli/Sentinelis.Cli.csproj \
             -c Release \
