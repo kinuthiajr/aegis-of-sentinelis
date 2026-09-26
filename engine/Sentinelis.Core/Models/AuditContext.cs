@@ -1,9 +1,14 @@
-namespace Sentinelis.Core.Models;
-
-// Produces either JSON or console output for the audit results. 
-// The context is passed to the auditor to determine what to check and how to report it.
+// The context passed to the auditor
 public record AuditContext(
     string TargetPath,
-    string OutputFormat = "console", // "console" or "json"
+    IReadOnlyList<DependencyInfo> Dependencies, //The agnostic bridge
+    string OutputFormat = "console",
     int QuarantineHours = 24
+);
+
+// Represents a parsed dependency from ANY ecosystem
+public record DependencyInfo(
+    string Ecosystem, // e.g., "npm", "pypi", "nuget"
+    string Name,
+    string Version
 );

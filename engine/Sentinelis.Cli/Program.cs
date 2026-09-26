@@ -1,4 +1,6 @@
-﻿using Sentinelis.Cli.Formatters;
+﻿using engine.Clients;
+using Sentinelis.Cli.Formatters;
+using Sentinelis.Core.Auditors;
 using Sentinelis.Core.Interfaces;
 using Sentinelis.Core.Models;
 using Sentinelis.Modules.Lockfiles.Auditors;
@@ -12,7 +14,7 @@ public static class Program
         var targetPath = Directory.GetCurrentDirectory();
         var format = "console";
 
-        // 1. Lightweight CLI Argument Parsing
+        // Lightweight CLI Argument Parsing
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "--path" && i + 1 < args.Length)
@@ -27,18 +29,26 @@ public static class Program
             }
         }
 
-        var context = new AuditContext(targetPath, format);
+        var context = new AuditContext(
+            TargetPath: targetPath,
+            Dependencies: new List<DependencyInfo>(), // Placeholder; actual dependency parsing logic would populate this
+            OutputFormat: format,
+            QuarantineHours: 24
+        );
 
-        // 2. Register Auditor Modules
+        // Shared Services and Auditors
+        var registryFactory = new RegistryClientFactory();
+
+        // Auditor Modules
         var auditors = new List<ISecurityAuditor>
         {
-            new NpmLockfileAuditor()
-            // new AgeGateAuditor() // Module ready to be plugged in here later
+            new NpmLockfileAuditor(),
+            new AgeGateAuditor(registryFactory)
         };
 
         var allViolations = new List<AuditViolation>();
 
-        // 3. Execution Loop
+        // Execution Loop to all the auditors
         try
         {
             foreach (var auditor in auditors)
@@ -47,7 +57,7 @@ public static class Program
                 allViolations.AddRange(violations);
             }
 
-            // 4. Output Routing
+            // Output Routing
             if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
             {
                 JsonFormatter.Format(allViolations);
