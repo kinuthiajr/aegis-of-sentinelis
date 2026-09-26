@@ -11,10 +11,13 @@ namespace Sentinelis.Core.Auditors;
 public class AgeGateAuditor : ISecurityAuditor
 {
     public string Name => "AgeGate";
-    private readonly RegistryClientFactory _registryFactory;
+    private readonly IRegistryClientFactory _registryFactory;
 
-    public AgeGateAuditor(RegistryClientFactory registryFactory)
+    public AgeGateAuditor(IRegistryClientFactory registryFactory)
     {
+        // <NB> Dependency Inversion Principle: your auditor will no longer care how the factory works, only that it fulfills the interface's contract.
+        // This allows for easier testing and future extensibility.
+
         _registryFactory = registryFactory;
     }
 

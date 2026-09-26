@@ -12,7 +12,7 @@ namespace engine.Clients
     // Returns the correct HTTP client for the given ecosystem, which can then be used to fetch package metadata and check for security vulnerabilities in dependencies.
     //</summary>
 
-    public class RegistryClientFactory
+    public class RegistryClientFactory : IRegistryClientFactory
     {
         private readonly NpmRegistryClient _npmClient = new();
 
