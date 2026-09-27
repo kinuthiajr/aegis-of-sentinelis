@@ -28,6 +28,9 @@ namespace Sentinelis.Modules.Lockfiles.Dtos
         [JsonPropertyName("version")]
         public string? Version { get; set; }
 
+        [JsonPropertyName("resolved")]
+        public string? Resolved { get; set; }
+
         [JsonPropertyName("hasInstallScript")]
         public bool HasInstallScript { get; set; }
 

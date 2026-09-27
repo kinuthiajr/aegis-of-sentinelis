@@ -1,91 +1,114 @@
 using System.Text.Json;
-using Sentinelis.Core.Models;
+using Sentinelis.Core.Interfaces;
 using Sentinelis.Modules.Lockfiles.Dtos;
 
-namespace Sentinelis.Modules.Lockfiles.Parsers;
+
+namespace Sentinelis.Modules.Parsers;
 
 // <summary>
-// Parses and audits npm lockfiles (package-lock.json) for security violations.
+// NpmLockfileParser is responsible for parsing npm lockfiles (package-lock.json) to extract dependency information.
+// It implements the IDependencyParser interface, allowing it to be used in a polymorphic way with other dependency parsers.
+// The parser is designed to be efficient, skipping over large directories like node_modules and .git
 // </summary>
 
-public class NpmLockfileParser
+public class NpmLockfileParser : IDependencyParser
 {
-    private static readonly string[] LifecycleHooks = ["preinstall", "install", "postinstall"];
-
-    public async Task<List<AuditViolation>> ParseAndAuditAsync(string lockfilePath, CancellationToken ct = default)
+    // A list of folders the engine should completely ignore to save time and memory
+    private static readonly HashSet<string> _ignoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     {
-        var violations = new List<AuditViolation>();
+        "node_modules", ".git", "bin", "obj", "dist", "build", ".idea", ".vscode"
+    };
 
-        if (!File.Exists(lockfilePath))
-            return violations;
+    public IEnumerable<DependencyInfo> Parse(string targetPath)
+    {
+        var allDependencies = new List<DependencyInfo>();
+        var lockfiles = FindFiles(targetPath, "package-lock.json");
 
-        await using var stream = File.OpenRead(lockfilePath);
-
-        // Native AOT Deserialization using Source Generator Context
-        var lockfile = await JsonSerializer.DeserializeAsync(
-            stream,
-            NpmLockfileJsonContext.Default.NpmLockfileDtos,
-            cancellationToken: ct);
-
-        if (lockfile == null)
-            return violations;
-
-        // 1. Audit v2/v3 Lockfile format ("packages")
-        if (lockfile.Packages != null)
+        // Parse every lockfile found in the repository
+        foreach (var lockfilePath in lockfiles)
         {
-            foreach (var (pkgPath, pkg) in lockfile.Packages)
+            allDependencies.AddRange(ParseSingleFile(lockfilePath));
+        }
+
+        return allDependencies;
+    }
+
+    // 1. Smart Directory Search (Skips node_modules!)
+    // <Note> Speed: By using a Queue and checking against _ignoredDirectories, it explicitly skips node_modules
+    private IEnumerable<string> FindFiles(string rootPath, string targetFileName)
+    {
+        var foundFiles = new List<string>();
+        var directoriesToSearch = new Queue<string>();
+        directoriesToSearch.Enqueue(rootPath);
+
+        while (directoriesToSearch.Count > 0)
+        {
+            var currentDir = directoriesToSearch.Dequeue();
+            var dirName = Path.GetFileName(currentDir);
+
+            // Skip heavy build directories and node_modules
+            if (_ignoredDirectories.Contains(dirName))
+                continue;
+
+            // Check if the lockfile exists in this specific folder
+            var possibleFile = Path.Combine(currentDir, targetFileName);
+            if (File.Exists(possibleFile))
             {
-                // Skip root workspace package ("")
-                if (string.IsNullOrEmpty(pkgPath)) continue;
+                foundFiles.Add(possibleFile);
+            }
 
-                var packageName = ExtractPackageName(pkgPath);
-                var version = pkg.Version ?? "unknown";
-
-                if (pkg.HasInstallScript || ContainsLifecycleScript(pkg.Scripts))
+            // Queue up all subdirectories to check them next
+            try
+            {
+                foreach (var subDir in Directory.GetDirectories(currentDir))
                 {
-                    violations.Add(new AuditViolation(
-                        ModuleName: "Lockfiles",
-                        PackageName: packageName,
-                        Version: version,
-                        Severity: "High",
-                        Description: $"Package '{packageName}@{version}' contains an active lifecycle install script."
-                    ));
+                    directoriesToSearch.Enqueue(subDir);
                 }
             }
-        }
-        // 2. Fallback to v1 Lockfile format ("dependencies")
-        else if (lockfile.Dependencies != null)
-        {
-            foreach (var (pkgName, dep) in lockfile.Dependencies)
+            catch (UnauthorizedAccessException)
             {
-                if (dep.HasInstallScript)
-                {
-                    violations.Add(new AuditViolation(
-                        ModuleName: "Lockfiles",
-                        PackageName: pkgName,
-                        Version: dep.Version ?? "unknown",
-                        Severity: "High",
-                        Description: $"Package '{pkgName}@{dep.Version}' flags active install scripts."
-                    ));
-                }
+                // Ignore folders we don't have permission to read
             }
         }
 
-        return violations;
+        return foundFiles;
     }
 
-    private static string ExtractPackageName(string packagePath)
+    // 2. The JSON Parsing logic
+    private IEnumerable<DependencyInfo> ParseSingleFile(string lockfilePath)
     {
-        // Converts "node_modules/foo/node_modules/bar" -> "bar"
-        var lastNodeModulesIndex = packagePath.LastIndexOf("node_modules/", StringComparison.Ordinal);
-        return lastNodeModulesIndex != -1
-            ? packagePath[(lastNodeModulesIndex + "node_modules/".Length)..]
-            : packagePath;
-    }
+        try
+        {
+            using var stream = File.OpenRead(lockfilePath);
+            var lockfile = JsonSerializer.Deserialize(stream, NpmLockfileJsonContext.Default.NpmLockfileDtos);
 
-    private static bool ContainsLifecycleScript(Dictionary<string, string>? scripts)
-    {
-        if (scripts == null) return false;
-        return scripts.Keys.Any(hook => LifecycleHooks.Contains(hook, StringComparer.OrdinalIgnoreCase));
+            if (lockfile?.Packages == null) return Enumerable.Empty<DependencyInfo>();
+
+            var dependencies = new List<DependencyInfo>();
+
+            foreach (var package in lockfile.Packages)
+            {
+                var path = package.Key;
+                if (string.IsNullOrEmpty(path)) continue;
+
+                var name = path.StartsWith("node_modules/") ? path.Substring(13) : path;
+
+                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(package.Value.Version))
+                {
+                    dependencies.Add(new DependencyInfo(
+                        Name: name,
+                        Version: package.Value.Version,
+                        Ecosystem: "npm"
+                    ));
+                }
+            }
+
+            return dependencies;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARNING] Failed to parse {lockfilePath}: {ex.Message}");
+            return Enumerable.Empty<DependencyInfo>();
+        }
     }
 }
