@@ -1,86 +1,78 @@
-name: Release Engine Binaries
+name: Release Sentinelis Binaries
 
 on:
   push:
     tags:
-      - "v*"
+      - "v*" # Triggers on tags like v1.0.0, v1.0.1, etc.
 
 jobs:
   build-aot:
-    name: Build Native AOT (${{ matrix.target }})
+    name: Build Native AOT (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
-            target: linux-x64
-            binary_name: Sentinelis.Cli
-            asset_name: Sentinelis.Cli-linux-x64
+            artifact_name: sentinelis-linux-x64
+            asset_name: sentinelis-linux-x64
           - os: macos-latest
-            target: osx-x64
-            binary_name: Sentinelis.Cli
-            asset_name: Sentinelis.Cli-osx-x64
-          - os: macos-latest
-            target: osx-arm64
-            binary_name: Sentinelis.Cli
-            asset_name: Sentinelis.Cli-osx-arm64
+            artifact_name: sentinelis-osx-x64
+            asset_name: sentinelis-osx-x64
           - os: windows-latest
-            target: win-x64
-            binary_name: Sentinelis.Cli.exe
-            asset_name: Sentinelis.Cli.exe-win-x64
+            artifact_name: sentinelis-win-x64.exe
+            asset_name: sentinelis-win-x64.exe
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "8.0.x" # Use your target .NET SDK version
 
-      - name: Install C++ Linker Dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
-
-      - name: Publish Native AOT Binary
-        shell: bash
+      - name: Publish Native AOT Executable
         run: |
           dotnet publish engine/Sentinelis.Cli/Sentinelis.Cli.csproj \
             -c Release \
-            -r ${{ matrix.target }} \
-            --self-contained true \
-            -o ./publish
+            -r ${{ matrix.os == 'ubuntu-latest' && 'linux-x64' || matrix.os == 'macos-latest' && 'osx-x64' || 'win-x64' }} \
+            -o publish_out
 
-      - name: Stage Asset File
+      - name: Rename Binary
         shell: bash
         run: |
-          mv ./publish/${{ matrix.binary_name }} ./publish/${{ matrix.asset_name }}
+          cd publish_out
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            mv Sentinelis.Cli.exe ${{ matrix.asset_name }}
+          else
+            mv Sentinelis.Cli ${{ matrix.asset_name }}
+          fi
 
-      - name: Upload Build Artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ./publish/${{ matrix.asset_name }}
+          name: ${{ matrix.artifact_name }}
+          path: publish_out/${{ matrix.asset_name }}
 
   create-release:
     name: Publish GitHub Release
     needs: build-aot
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Required to create releases
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Download All Native Artifacts
+      - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./release-assets
+          path: binaries
 
-      - name: Create GitHub Release
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: ./release-assets/**/*
+          files: |
+            binaries/sentinelis-linux-x64/sentinelis-linux-x64
+            binaries/sentinelis-osx-x64/sentinelis-osx-x64
+            binaries/sentinelis-win-x64.exe/sentinelis-win-x64.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
