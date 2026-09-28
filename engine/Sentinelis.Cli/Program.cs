@@ -61,6 +61,7 @@ public static class Program
         // Note: If you added 'Config' directly to AuditContext, pass it here too: Config: config
         );
 
+
         // Shared Services
         var registryFactory = new RegistryClientFactory();
 
@@ -98,6 +99,26 @@ public static class Program
 
                 return !config.Allowlist.Contains(packageId) && !config.Allowlist.Contains(exactVersionId);
             }).ToList();
+
+            // 5. OUTPUT ROUTING PHASE (SARIF vs JSON vs Console)
+            // Now that we have `filteredViolations`, we can format them.
+            if (format.Equals("sarif", StringComparison.OrdinalIgnoreCase))
+            {
+                var sarifJson = SarifFormatter.Format(filteredViolations);
+
+                // Write directly to file for GitHub upload step
+                var outputPath = Path.Combine(targetPath, "sentinelis.sarif");
+                await File.WriteAllTextAsync(outputPath, sarifJson);
+
+                Console.WriteLine($"[SARIF] Report successfully written to {outputPath}");
+
+                // Exit codes for SARIF
+                if (filteredViolations.Count > 0 && config.Mode.Equals("enforce", StringComparison.OrdinalIgnoreCase))
+                {
+                    return 1;
+                }
+                return 0;
+            }
 
             // 5. Output Routing & Execution Modes (Enforce vs Audit)
             if (format.Equals("json", StringComparison.OrdinalIgnoreCase))

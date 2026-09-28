@@ -1,26 +1,85 @@
-name: 'Sentinelis Security Audit'
-description: 'Fast, Native AOT dependency security scanner for GitHub Actions.'
+name: 'Sentinelis Security Auditor'
+description: 'Language-agnostic, Native AOT security auditing engine.'
 author: 'Sentinelis'
+
 inputs:
-  version:
-    description: 'Version of the Sentinelis C# engine binary to fetch.'
-    required: false
-    default: '1.0.0'
-  target-path:
-    description: 'Directory path containing lockfiles to scan.'
+  path:
+    description: 'Directory path to audit relative to repository root'
     required: false
     default: '.'
-  github-token:
-    description: 'GitHub PAT or secrets.GITHUB_TOKEN to post PR comments.'
+  version:
+    description: 'Version tag of Sentinelis release binary to use'
     required: false
-    default: '${{ github.token }}'
-  engine-repository:
-    description: 'GitHub repository (owner/repo) hosting the engine releases.'
+    default: 'v1.0.0'
+  token:
+    description: 'GitHub token for downloading releases'
     required: false
-    default: '${{ github.repository }}'
+    default: ${{ github.token }}
+
 runs:
-  using: 'node20'
-  main: 'dist/index.js'
-branding:
-  icon: 'shield'
-  color: 'red'
+  using: 'composite'
+  steps:
+    - name: Set OS and Binary Target
+      id: os_detect
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Linux)
+            echo "BINARY_NAME=sentinelis-linux-x64" >> $GITHUB_ENV
+            echo "EXEC_NAME=sentinelis" >> $GITHUB_ENV
+            ;;
+          macOS)
+            echo "BINARY_NAME=sentinelis-osx-x64" >> $GITHUB_ENV
+            echo "EXEC_NAME=sentinelis" >> $GITHUB_ENV
+            ;;
+          Windows)
+            echo "BINARY_NAME=sentinelis-win-x64.exe" >> $GITHUB_ENV
+            echo "EXEC_NAME=sentinelis.exe" >> $GITHUB_ENV
+            ;;
+          *)
+            echo "::error::Unsupported Runner OS: ${{ runner.os }}"
+            exit 1
+            ;;
+        esac
+
+    - name: Download Sentinelis Native AOT Binary
+      shell: bash
+      run: |
+        RELEASE_URL="https://github.com/${{ github.repository_owner }}/sentinelis/releases/download/${{ inputs.version }}/${{ env.BINARY_NAME }}"
+        echo "Downloading Sentinelis from ${RELEASE_URL}..."
+        
+        curl -sSL -H "Authorization: token ${{ inputs.token }}" \
+             -o "${{ env.EXEC_NAME }}" "${RELEASE_URL}" || {
+               echo "::error::Failed to download Sentinelis binary for ${{ runner.os }}"
+               exit 1
+             }
+
+        chmod +x "${{ env.EXEC_NAME }}"
+
+    - name: Execute Audit & Publish Job Summary
+      shell: bash
+      run: |
+        set +e # Prevent shell from exiting immediately so we can write the step summary
+        
+        # Execute Sentinelis in JSON mode for parsing, and capture stdout
+        OUTPUT=$(./${{ env.EXEC_NAME }} --path "${{ inputs.path }}" --format json)
+        EXIT_CODE=$?
+
+        # Write header to GitHub Job Summary UI
+        echo "## 🛡️ Sentinelis Security Audit Results" >> $GITHUB_STEP_SUMMARY
+        echo "Target Directory: \`${{ inputs.path }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "✅ **Audit Passed**: No blocking security violations found." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "🚨 **Audit Failed**: Security violations detected." >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+        echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+        # Return original exit code to fail or pass the GitHub CI job
+        exit $EXIT_CODE

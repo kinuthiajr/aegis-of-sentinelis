@@ -1,0 +1,30 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write # Required to post results to the Code Security tab
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Sentinelis (Generate SARIF)
+        uses: your-org/sentinelis-action@v1
+        with:
+          path: "."
+          format: "sarif"
+        continue-on-error: true # Allow run to proceed so SARIF upload always executes
+
+      - name: Upload SARIF to GitHub Code Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "sentinelis.sarif"
