@@ -9,7 +9,9 @@ using Sentinelis.Cli.Formatters;
 using Sentinelis.Core.Auditors;
 using Sentinelis.Core.Interfaces;
 using Sentinelis.Core.Models;
-using Sentinelis.Modules.Lockfiles.Auditors;
+using Sentinelis.Modules.Lockfiles.Parsers.Npm;
+using Sentinelis.Modules.Lockfiles.Parsers.Npm.Models;
+
 
 namespace Sentinelis.Cli;
 
@@ -52,15 +54,30 @@ public static class Program
             }
         }
 
+        // PARSING PHASE: Extract dependencies using all registered parsers
+
+        var parsers = new List<IDependencyParser>
+        {
+            new NpmLockfileParser()
+        };
+
+
+        var dependencies = new List<DependencyInfo>();
+        foreach (var parser in parsers)
+        {
+            var parsed = parser.Parse(targetPath).ToList();
+            // Console.WriteLine($"[INFO] {parser.GetType().Name} discovered {parsed.Count} dependencies.");
+            dependencies.AddRange(parsed);
+        }
+
         // Update AuditContext to use the dynamic QuarantineHours from the config
         var context = new AuditContext(
-            TargetPath: targetPath,
-            Dependencies: new List<DependencyInfo>(), // Placeholder; actual dependency parsing logic would populate this
-            OutputFormat: format,
-            QuarantineHours: config.QuarantineHours
+            targetPath: targetPath,
+            dependencies: dependencies,
+            outputFormat: format,
+            quarantineHours: config.QuarantineHours
         // Note: If you added 'Config' directly to AuditContext, pass it here too: Config: config
         );
-
 
         // Shared Services
         var registryFactory = new RegistryClientFactory();
@@ -68,11 +85,20 @@ public static class Program
         // 3. AUDITOR REGISTRATION PHASE: Apply rule toggles from config
         var auditors = new List<ISecurityAuditor>();
 
-        // Always run lockfile auditor unless explicitly disabled
-        if (!config.Rules.TryGetValue("NpmScripts", out var npmScriptsEnabled) || npmScriptsEnabled)
+        // Rule check for unencrypted http:// registry URLs
+        if (!config.Rules.TryGetValue("InsecureRegistry", out var insecureRegistryEnabled) || insecureRegistryEnabled)
         {
-            auditors.Add(new NpmLockfileAuditor());
+            auditors.Add(new InsecureRegistryAuditor());
         }
+
+        // Rule check for preinstall/install/postinstall scripts
+        if (!config.Rules.TryGetValue("ScriptExecution", out var scriptExecutionEnabled) || scriptExecutionEnabled)
+        {
+            auditors.Add(new ScriptExecutionAuditor());
+        }
+
+        // 🔍 DEBUG: Print how many auditors are registered
+        // Console.WriteLine($"[DEBUG] Registered auditors count: {auditors.Count}");
 
         // Only add AgeGate if it isn't explicitly disabled
         if (!config.Rules.TryGetValue("AgeGate", out var ageGateEnabled) || ageGateEnabled)
@@ -87,7 +113,7 @@ public static class Program
         {
             foreach (var auditor in auditors)
             {
-                var violations = await auditor.AuditAsync(context);
+                var violations = (await auditor.AuditAsync(context)).ToList();
                 allViolations.AddRange(violations);
             }
 
@@ -100,7 +126,7 @@ public static class Program
                 return !config.Allowlist.Contains(packageId) && !config.Allowlist.Contains(exactVersionId);
             }).ToList();
 
-            // 5. OUTPUT ROUTING PHASE (SARIF vs JSON vs Console)
+            // OUTPUT ROUTING PHASE (SARIF vs JSON vs Console)
             // Now that we have `filteredViolations`, we can format them.
             if (format.Equals("sarif", StringComparison.OrdinalIgnoreCase))
             {

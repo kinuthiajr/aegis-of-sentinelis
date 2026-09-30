@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Sentinelis.Core.Models;
 
 namespace Sentinelis.Core.Interfaces
 {

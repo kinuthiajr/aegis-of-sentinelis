@@ -1,14 +1,23 @@
-// The context passed to the auditor
-public record AuditContext(
-    string TargetPath,
-    IReadOnlyList<DependencyInfo> Dependencies, //The agnostic bridge
-    string OutputFormat = "console",
-    int QuarantineHours = 24
-);
+using System.Collections.Generic;
 
-// Represents a parsed dependency from ANY ecosystem
-public record DependencyInfo(
-    string Ecosystem, // e.g., "npm", "pypi", "nuget"
-    string Name,
-    string Version
-);
+namespace Sentinelis.Core.Models;
+
+public class AuditContext
+{
+    public string TargetPath { get; }
+    public IReadOnlyList<DependencyInfo> Dependencies { get; }
+    public string OutputFormat { get; }
+    public int QuarantineHours { get; }
+
+    public AuditContext(
+        string targetPath,
+        IReadOnlyList<DependencyInfo> dependencies,
+        string outputFormat = "console",
+        int quarantineHours = 168)
+    {
+        TargetPath = targetPath;
+        Dependencies = dependencies;
+        OutputFormat = outputFormat;
+        QuarantineHours = quarantineHours;
+    }
+}
