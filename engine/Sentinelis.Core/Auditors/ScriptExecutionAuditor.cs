@@ -15,6 +15,7 @@ public class ScriptExecutionAuditor : ISecurityAuditor
     {
         var violations = context.Dependencies
             .Where(dep => dep.HasInstallScript)
+            .Where(dep => !context.Trust.IsAllowed(dep.Name, Name))
             .Select(dep => new AuditViolation(
                 ModuleName: Name,
                 PackageName: dep.Name,

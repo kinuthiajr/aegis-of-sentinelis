@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using System.Threading.Tasks;
 using engine.Clients;
+using Sentinelis.Cli.Commands;
 using Sentinelis.Cli.Formatters;
 using Sentinelis.Core.Auditors;
 using Sentinelis.Core.Interfaces;
+using Sentinelis.Core.Loaders;
 using Sentinelis.Core.Models;
 using Sentinelis.Modules.Lockfiles.Parsers.Npm;
-using Sentinelis.Modules.Lockfiles.Parsers.Npm.Models;
 
 
 namespace Sentinelis.Cli;
@@ -23,18 +23,36 @@ public static class Program
         var format = "console";
 
         // 1. Lightweight CLI Argument Parsing
-        for (var i = 0; i < args.Length; i++)
+        // to detect if the user invoked sentinelis trust. 
+        // If they did, handle the command and exit before the auditing engine runs.
+        if (args.Length > 0 && args[0].ToLowerInvariant() == "trust")
         {
-            if (args[i] == "--path" && i + 1 < args.Length)
+            if (args.Length < 2)
             {
-                targetPath = args[i + 1];
-                i++;
+                Console.WriteLine("Usage: sentinelis trust <package> [--rule <RuleName>] [--path <Path>]");
+                Environment.Exit(1);
             }
-            else if (args[i] == "--format" && i + 1 < args.Length)
+
+            var packageName = args[1];
+            var ruleName = "ScriptExecution"; // Default rule
+
+
+            for (var i = 2; i < args.Length; i++)
             {
-                format = args[i + 1];
-                i++;
+                if (args[i] == "--rule" && i + 1 < args.Length)
+                {
+                    ruleName = args[i + 1];
+                    i++;
+                }
+                else if (args[i] == "--path" && i + 1 < args.Length)
+                {
+                    targetPath = args[i + 1];
+                    i++;
+                }
             }
+
+            TrustCommandHandler.Execute(packageName, ruleName, targetPath);
+            Environment.Exit(0);
         }
 
         // 2. CONFIG LOAD PHASE: Read sentinelis.json from the target directory
@@ -70,11 +88,14 @@ public static class Program
             dependencies.AddRange(parsed);
         }
 
+        var trustManifest = TrustManifestLoader.Load(targetPath);
+
         // Update AuditContext to use the dynamic QuarantineHours from the config
         var context = new AuditContext(
             targetPath: targetPath,
             dependencies: dependencies,
             outputFormat: format,
+            trust: trustManifest,
             quarantineHours: config.QuarantineHours
         // Note: If you added 'Config' directly to AuditContext, pass it here too: Config: config
         );

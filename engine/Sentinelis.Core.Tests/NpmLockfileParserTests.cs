@@ -1,21 +1,20 @@
 using System.IO;
 using System.Linq;
 using Sentinelis.Modules.Lockfiles.Parsers.Npm;
-using Sentinelis.Modules.Parsers.Npm;
 using Xunit;
 
 namespace Sentinelis.Tests.Parsers;
 
 public class NpmLockfileParserTests
 {
-    [Fact]
-    public void Parse_ExtractsDependenciesAndLifecycleFlags_FromLockfile()
-    {
-        // Arrange
-        var tempFolder = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempFolder);
+  [Fact]
+  public void Parse_ExtractsDependenciesAndLifecycleFlags_FromLockfile()
+  {
+    // Arrange
+    var tempFolder = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+    Directory.CreateDirectory(tempFolder);
 
-        var sampleLockfileJson = """
+    var sampleLockfileJson = """
         {
           "name": "test-project",
           "version": "1.0.0",
@@ -34,28 +33,28 @@ public class NpmLockfileParserTests
         }
         """;
 
-        File.WriteAllText(Path.Combine(tempFolder, "package-lock.json"), sampleLockfileJson);
+    File.WriteAllText(Path.Combine(tempFolder, "package-lock.json"), sampleLockfileJson);
 
-        try
-        {
-            var parser = new NpmLockfileParser();
+    try
+    {
+      var parser = new NpmLockfileParser();
 
-            // Act
-            var dependencies = parser.Parse(tempFolder).ToList();
+      // Act
+      var dependencies = parser.Parse(tempFolder).ToList();
 
-            // Assert
-            Assert.Equal(2, dependencies.Count);
+      // Assert
+      Assert.Equal(2, dependencies.Count);
 
-            var sqlite = dependencies.First(d => d.Name == "sqlite3");
-            Assert.True(sqlite.HasInstallScript);
-            Assert.StartsWith("http://", sqlite.ResolvedUrl);
+      var sqlite = dependencies.First(d => d.Name == "sqlite3");
+      Assert.True(sqlite.HasInstallScript);
+      Assert.StartsWith("http://", sqlite.ResolvedUrl);
 
-            var axios = dependencies.First(d => d.Name == "axios");
-            Assert.False(axios.HasInstallScript);
-        }
-        finally
-        {
-            Directory.Delete(tempFolder, true);
-        }
+      var axios = dependencies.First(d => d.Name == "axios");
+      Assert.False(axios.HasInstallScript);
     }
+    finally
+    {
+      Directory.Delete(tempFolder, true);
+    }
+  }
 }
