@@ -6,6 +6,187 @@ Sentinelis is a high-performance, Native AOT-compiled security gate designed to 
 
 ---
 
+### Get started
+
+### GitHub Actions & CI/CD Integration
+
+Sentinelis compiles to a native binary (Native AOT), allowing it to execute inside CI/CD environments without requiring the .NET 9.0 SDK on the runner. What it means, its superfast.
+
+#### Workflow Setup (.github/workflows/sentinelis.yml)
+
+1. Create a workflow file in your repository at **.github/workflows/sentinelis.yml**
+
+```yml
+name: Sentinelisis-Takeoff
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  security-events: write # Required for GitHub Security tab SARIF alerts
+
+jobs:
+  audit-all-services:
+    name: Audit Microservices
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. Download Sentinelis Native Binary
+      - name: Download Sentinelis Engine
+        run: |
+          curl -L -o sentinelis https://github.com/my-org/sentinelis/releases/latest/download/sentinelis-linux-x64
+          chmod +x sentinelis
+          sudo mv sentinelis /usr/local/bin/
+
+      # 2. Single pass scan across all subdirectories
+      - name: Run Sentinelis Engine Across All Services
+        run: |
+          sentinelis --path . --format sarif --mode enforce
+        continue-on-error: true
+
+      # 3. Report all findings to GitHub Security Tab
+      - name: Upload SARIF to GitHub Code Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "sentinelis.sarif"
+```
+
+**Change the **your-org\*\* to your repo
+
+### One more thing
+
+#### Developer Workflow & sentinelis-trust.lock
+
+Sentinelis uses a version-controlled manifest (sentinelis-trust.lock) to maintain explicit rule bypasses for verified dependencies without turning off security checks globally.
+
+```md
+[1. Local Dry Run] ──► [2. Trust via CLI] ──► [3. Commit Manifest] ──► [4. Automatic CI Pass]
+`sentinelis --path .` `sentinelis trust` `git push` `GitHub Actions`
+```
+
+#### Step-by-Step Developer Flow
+
+1. Add a Package & Run a Local Dry Run
+   When you install a new dependency that relies on native compilation or build hooks (e.g., esbuild):
+
+```md
+Bash
+npm install esbuild
+```
+
+Before pushing to GitHub, run a local scan to verify rule compliance:
+
+```md
+Bash
+
+# macOS / Linux
+
+sentinelis --path . --format console
+
+# Windows (PowerShell)
+
+.\sentinelis.exe --path . --format console
+```
+
+2. Handle Flagged Violations
+   If Sentinelis flags a lifecycle script (ScriptExecution) or recent release (AgeGate):
+
+```md
+[!] Found 1 security violation(s):
+
+[High] ScriptExecution: Package 'esbuild' (npm) executes an automated lifecycle script.
+```
+
+Inspect the package source. If your team verifies that the script is safe, add an exception for that rule:
+
+```md
+Bash
+sentinelis trust esbuild --rule ScriptExecution --path .
+```
+
+3. Inspect sentinelis-trust.lock
+   Sentinelis updates or generates sentinelis-trust.lock in your project root:
+
+```json
+{
+  "trusted": {
+    "esbuild": {
+      "allowedRules": ["ScriptExecution"]
+    }
+  }
+}
+```
+
+4. Commit to Version Control
+   Commit sentinelis-trust.lock alongside your package.json changes:
+
+```md
+Bash
+git add package.json package-lock.json sentinelis-trust.lock
+git commit -m "chore(security): allowlist esbuild lifecycle script in trust manifest"
+git push origin feature-branch
+```
+
+5. Automatic CI Verification
+   When GitHub Actions runs, Sentinelis reads sentinelis-trust.lock, bypasses ScriptExecution specifically for esbuild, and passes the PR check with exit code 0.
+
+### Quick Reference CLI Commands
+
+```md
+# Run a security audit against target path
+
+sentinelis --path /path/to/project --format console
+
+# Run in non-blocking advisory mode
+
+sentinelis --path . --mode audit
+
+# Allowlist a rule for a verified package
+
+sentinelis trust <package-name> --rule <RuleName> --path .
+
+# Allowlist AgeGate for a newly published internal library
+
+sentinelis trust @my-org/core --rule AgeGate --path .
+```
+
+### Engine Configuration (sentinelis.json)
+
+2. To establish shared project defaults across all developers and CI runs, create a sentinelis.json file in your repository root during initial setup.
+
+```json
+{
+  "mode": "enforce",
+  "quarantineHours": 168,
+  "rules": {
+    "ScriptExecution": true,
+    "InsecureRegistry": true,
+    "AgeGate": true
+  }
+}
+```
+
+| Field                    | Type    | Default     | Description                                                                                   |
+| ------------------------ | ------- | ----------- | --------------------------------------------------------------------------------------------- |
+| `mode`                   | String  | `"enforce"` | Operational mode (`"audit"` or `"enforce"`).                                                  |
+| `quarantineHours`        | Integer | `168`       | Window (in hours) used by AgeGate to flag newly published package releases (`168h` = 7 days). |
+| `rules.ScriptExecution`  | Boolean | `true`      | Flags packages with lifecycle install scripts (`postinstall`, `preinstall`).                  |
+| `rules.InsecureRegistry` | Boolean | `true`      | Flags packages resolving over unencrypted `http://` registry URLs.                            |
+| `rules.AgeGate`          | Boolean | `true`      | Flags package versions published within the quarantine window.                                |
+
+### Operational Modes (audit vs. enforce)
+
+- audit (Advisory Mode): Logs security violations as warnings in CI logs but always exits with code 0. Best for onboarding existing repos to inventory current supply-chain risks without blocking work.
+- enforce (Strict Mode): Logs violations and exits with code 1, blocking pull requests from merging until exceptions are allowlisted.
+  **CLI Override:** You can override the file configuration in terminal scripts or CI steps using flags:
+
 ## Why Pre-Install Admission Control?
 
 ### The Pipeline Ordering Problem
@@ -76,7 +257,7 @@ If your organization requires deep source code inspection, static code analysis,
 
 ---
 
-## 🛡️ Threat Model & Security Coverage
+## Threat Model & Security Coverage
 
 Sentinelis provides an execution-prevention layer targeting the initial stage of supply chain compromises:
 
@@ -191,50 +372,4 @@ Developers can download the standalone binary or compile locally to verify lockf
 
 # Raw JSON output format
 ./sentinelis --path ./my-project --format json
-```
-
----
-
-## Configuration (`sentinelis.json`)
-
-Customize admission policies by adding a `sentinelis.json` file to the root directory of your repository. If absent, Sentinelis executes in `enforce` mode with secure default parameters.
-
-```json
-{
-  "mode": "enforce",
-  "quarantineHours": 24,
-  "allowlist": ["lodash", "express@4.18.2"],
-  "rules": {
-    "NpmScripts": true,
-    "AgeGate": true
-  }
-}
-```
-
-### Options Specification
-
-- **`mode`**:
-  - `"enforce"` _(Default)_ - Exits with code `1` if unresolved policy violations exist, halting the CI pipeline.
-  - `"audit"` - Logs violations as warnings and exits with code `0`.
-- **`quarantineHours`**: Integer specifying the minimum required release age (in hours) before a package version is admitted. _(Default: 24)_.
-- **`allowlist`**: Array of package identifiers exempted from policy violations. Accepts package names (`"lodash"`) or exact package-version pairs (`"express@4.18.2"`).
-- **`rules`**: Map enabling (`true`) or disabling (`false`) specific admission checkers.
-
----
-
-## Standardized Decision Payload
-
-When executed with `--format json`, Sentinelis emits a structured decision summary suitable for downstream orchestration tools or git hooks:
-
-```json
-{
-  "decision": "block",
-  "evaluatedAt": "2026-09-28T12:00:00Z",
-  "totalDependenciesEvaluated": 142,
-  "reasons": [
-    "[AgeGate] express-utils@1.0.4: Package release age is 3.5 hours (policy requires >= 24 hours)",
-    "[InsecureProtocol] core-parser@2.1.0: Resolved URL uses insecure protocol 'http://registry.internal'",
-    "[MissingIntegrity] tar-stream@2.1.0: Checksum/integrity hash field is missing"
-  ]
-}
 ```
