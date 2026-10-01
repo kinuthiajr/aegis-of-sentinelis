@@ -1,20 +1,41 @@
 name: 'Sentinelis Security Auditor'
-description: 'Language-agnostic, Native AOT security auditing engine.'
+description: 'Language-agnostic, Native AOT dependency security auditing engine.'
 author: 'Sentinelis'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
 
 inputs:
   path:
     description: 'Directory path to audit relative to repository root'
     required: false
     default: '.'
+  mode:
+    description: 'Operational mode: "enforce" (fails CI on violation) or "audit" (advisory only)'
+    required: false
+    default: 'enforce'
+  format:
+    description: 'Primary output format: "console", "sarif", or "json"'
+    required: false
+    default: 'sarif'
   version:
     description: 'Version tag of Sentinelis release binary to use'
     required: false
     default: 'v1.0.0'
+  verify-checksum:
+    description: 'Verify SHA-256 checksum before executing binary'
+    required: false
+    default: 'true'
   token:
     description: 'GitHub token for downloading releases'
     required: false
     default: ${{ github.token }}
+
+outputs:
+  sarif-path:
+    description: 'Path to generated SARIF file if format=sarif'
+    value: 'sentinelis.sarif'
 
 runs:
   using: 'composite'
@@ -42,44 +63,63 @@ runs:
             ;;
         esac
 
-    - name: Download Sentinelis Native AOT Binary
+    - name: Download Binary & SHA-256 Checksum
       shell: bash
       run: |
-        RELEASE_URL="https://github.com/${{ github.repository_owner }}/sentinelis/releases/download/${{ inputs.version }}/${{ env.BINARY_NAME }}"
-        echo "Downloading Sentinelis from ${RELEASE_URL}..."
+        BASE_URL="https://github.com/${{ github.repository_owner }}/sentinelis/releases/download/${{ inputs.version }}"
         
-        curl -sSL -H "Authorization: token ${{ inputs.token }}" \
-             -o "${{ env.EXEC_NAME }}" "${RELEASE_URL}" || {
+        echo "::group::Downloading Sentinelis Binary (${{ inputs.version }})"
+        curl -sSL -f -H "Authorization: token ${{ inputs.token }}" \
+             -o "${{ env.EXEC_NAME }}" "${BASE_URL}/${{ env.BINARY_NAME }}" || {
                echo "::error::Failed to download Sentinelis binary for ${{ runner.os }}"
                exit 1
              }
 
         chmod +x "${{ env.EXEC_NAME }}"
 
+        if [ "${{ inputs.verify-checksum }}" = "true" ]; then
+          echo "Downloading SHA-256 checksum..."
+          curl -sSL -f -H "Authorization: token ${{ inputs.token }}" \
+               -o "${{ env.EXEC_NAME }}.sha256" "${BASE_URL}/${{ env.BINARY_NAME }}.sha256" || {
+                 echo "::error::Failed to download SHA-256 checksum asset."
+                 exit 1
+               }
+
+          # Multi-platform SHA-256 verification
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "${{ env.EXEC_NAME }}.sha256"
+          elif command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 -c "${{ env.EXEC_NAME }}.sha256"
+          else
+            echo "::warning::No sha256sum utility found on runner. Skipping hash check."
+          fi
+          
+          echo "✔ Checksum verified successfully."
+        fi
+        echo "::endgroup::"
+
     - name: Execute Audit & Publish Job Summary
       shell: bash
       run: |
-        set +e # Prevent shell from exiting immediately so we can write the step summary
-        
-        # Execute Sentinelis in JSON mode for parsing, and capture stdout
-        OUTPUT=$(./${{ env.EXEC_NAME }} --path "${{ inputs.path }}" --format json)
+        set +e # Capture exit code manually to build summary before job exit
+
+        # 1. Execute Sentinelis (stdout contains workflow annotations ::error::)
+        ./${{ env.EXEC_NAME }} --path "${{ inputs.path }}" \
+                               --mode "${{ inputs.mode }}" \
+                               --format "${{ inputs.format }}"
         EXIT_CODE=$?
 
-        # Write header to GitHub Job Summary UI
+        # 2. Write Markdown Step Summary to GitHub Actions UI
         echo "## 🛡️ Sentinelis Security Audit Results" >> $GITHUB_STEP_SUMMARY
-        echo "Target Directory: \`${{ inputs.path }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Target Path:** \`${{ inputs.path }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Operational Mode:** \`${{ inputs.mode }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Output Format:** \`${{ inputs.format }}\`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
 
         if [ $EXIT_CODE -eq 0 ]; then
-          echo "✅ **Audit Passed**: No blocking security violations found." >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Audit Passed**: No unallowed security violations detected." >> $GITHUB_STEP_SUMMARY
         else
-          echo "🚨 **Audit Failed**: Security violations detected." >> $GITHUB_STEP_SUMMARY
+          echo "🚨 **Audit Failed**: Security violations found requiring resolution or allowlisting in \`sentinelis-trust.lock\`." >> $GITHUB_STEP_SUMMARY
         fi
 
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
-        echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
-        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-
-        # Return original exit code to fail or pass the GitHub CI job
         exit $EXIT_CODE

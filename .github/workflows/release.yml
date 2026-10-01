@@ -1,26 +1,38 @@
-name: Release Sentinelis Binaries
+name: Release Native AOT Engine
 
 on:
   push:
     tags:
-      - "v*" # Triggers on tags like v1.0.0, v1.0.1, etc.
+      - "v*" # Triggers when pushing tags like v1.0.0, v1.1.2
+
+permissions:
+  contents: write # Required for creating release assets
 
 jobs:
-  build-aot:
-    name: Build Native AOT (${{ matrix.os }})
+  build-and-release:
+    name: Build Native AOT (${{ matrix.rid }})
     runs-on: ${{ matrix.os }}
+
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: sentinelis-linux-x64
-            asset_name: sentinelis-linux-x64
+            rid: linux-x64
+            binary_name: sentinelis-linux-x64
+            exec_file: sentinelis
           - os: macos-latest
-            artifact_name: sentinelis-osx-x64
-            asset_name: sentinelis-osx-x64
+            rid: osx-x64
+            binary_name: sentinelis-osx-x64
+            exec_file: sentinelis
+          - os: macos-latest
+            rid: osx-arm64
+            binary_name: sentinelis-osx-arm64
+            exec_file: sentinelis
           - os: windows-latest
-            artifact_name: sentinelis-win-x64.exe
-            asset_name: sentinelis-win-x64.exe
+            rid: win-x64
+            binary_name: sentinelis-win-x64.exe
+            exec_file: sentinelis.exe
 
     steps:
       - name: Checkout Code
@@ -29,50 +41,50 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x" # Use your target .NET SDK version
+          dotnet-version: "9.0.x"
 
-      - name: Publish Native AOT Executable
+      # 1. Install Linux AOT prerequisites
+      - name: Install Linux Build Dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      # 2. Compile Native AOT Binary
+      - name: Publish Native AOT Binary
+        shell: bash
         run: |
           dotnet publish engine/Sentinelis.Cli/Sentinelis.Cli.csproj \
             -c Release \
-            -r ${{ matrix.os == 'ubuntu-latest' && 'linux-x64' || matrix.os == 'macos-latest' && 'osx-x64' || 'win-x64' }} \
-            -o publish_out
+            -r ${{ matrix.rid }} \
+            -p:PublishAot=true \
+            -p:SelfContained=true \
+            -p:PublishTrimmed=true \
+            -o ./publish
 
-      - name: Rename Binary
+          # Rename binary to target artifact name
+          mv "./publish/${{ matrix.exec_file }}" "./publish/${{ matrix.binary_name }}"
+
+      # 3. Generate SHA-256 Checksum Asset
+      - name: Generate SHA-256 Checksum
         shell: bash
         run: |
-          cd publish_out
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            mv Sentinelis.Cli.exe ${{ matrix.asset_name }}
+          cd publish
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${{ matrix.binary_name }}" > "${{ matrix.binary_name }}.sha256"
           else
-            mv Sentinelis.Cli ${{ matrix.asset_name }}
+            shasum -a 256 "${{ matrix.binary_name }}" > "${{ matrix.binary_name }}.sha256"
           fi
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: publish_out/${{ matrix.asset_name }}
+          echo "Generated Checksum:"
+          cat "${{ matrix.binary_name }}.sha256"
 
-  create-release:
-    name: Publish GitHub Release
-    needs: build-aot
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # Required to create releases
-    steps:
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: binaries
-
-      - name: Create Release and Upload Assets
+      # 4. Upload Assets to GitHub Release Tag
+      - name: Upload Binary and Checksum to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            binaries/sentinelis-linux-x64/sentinelis-linux-x64
-            binaries/sentinelis-osx-x64/sentinelis-osx-x64
-            binaries/sentinelis-win-x64.exe/sentinelis-win-x64.exe
-          generate_release_notes: true
+            publish/${{ matrix.binary_name }}
+            publish/${{ matrix.binary_name }}.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
