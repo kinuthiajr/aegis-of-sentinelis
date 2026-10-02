@@ -28,7 +28,7 @@ inputs:
     required: false
     default: 'true'
   token:
-    description: 'GitHub token for downloading releases'
+    description: 'GitHub token for downloading releases and posting PR comments'
     required: false
     default: ${{ github.token }}
 
@@ -85,7 +85,6 @@ runs:
                  exit 1
                }
 
-          # Multi-platform SHA-256 verification
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum -c "${{ env.EXEC_NAME }}.sha256"
           elif command -v shasum >/dev/null 2>&1; then
@@ -101,15 +100,16 @@ runs:
     - name: Execute Audit & Publish Job Summary
       shell: bash
       run: |
-        set +e # Capture exit code manually to build summary before job exit
+        set +e # Prevent step from exiting immediately so PR comment can run
 
-        # 1. Execute Sentinelis (stdout contains workflow annotations ::error::)
         ./${{ env.EXEC_NAME }} --path "${{ inputs.path }}" \
                                --mode "${{ inputs.mode }}" \
                                --format "${{ inputs.format }}"
+        
         EXIT_CODE=$?
+        echo "AUDIT_EXIT_CODE=$EXIT_CODE" >> $GITHUB_ENV
 
-        # 2. Write Markdown Step Summary to GitHub Actions UI
+        # Publish Markdown Step Summary to Actions Run Tab
         echo "## 🛡️ Sentinelis Security Audit Results" >> $GITHUB_STEP_SUMMARY
         echo "- **Target Path:** \`${{ inputs.path }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Operational Mode:** \`${{ inputs.mode }}\`" >> $GITHUB_STEP_SUMMARY
@@ -118,8 +118,31 @@ runs:
 
         if [ $EXIT_CODE -eq 0 ]; then
           echo "✅ **Audit Passed**: No unallowed security violations detected." >> $GITHUB_STEP_SUMMARY
+          echo "PR_STATUS_MSG=✅ **Audit Passed**: No unallowed security violations detected." >> $GITHUB_ENV
         else
-          echo "🚨 **Audit Failed**: Security violations found requiring resolution or allowlisting in \`sentinelis-trust.lock\`." >> $GITHUB_STEP_SUMMARY
+          echo "🚨 **Audit Failed**: Security violations found requiring resolution." >> $GITHUB_STEP_SUMMARY
+          echo "PR_STATUS_MSG=🚨 **Audit Failed**: Security violations found requiring resolution or allowlisting in \`sentinelis-trust.lock\`." >> $GITHUB_ENV
         fi
 
-        exit $EXIT_CODE
+    # --- PR COMMENT STEP PLACEMENT ---
+    - name: Post or Update Sticky PR Comment
+      if: github.event_name == 'pull_request'
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        header: sentinelis-security-audit
+        message: |
+          ### 🛡️ Sentinelis Security Audit Report
+          - **Target Path:** `${{ inputs.path }}`
+          - **Operational Mode:** `${{ inputs.mode }}`
+          
+          ${{ env.PR_STATUS_MSG }}
+
+    # --- FINAL ENFORCEMENT GATE ---
+    - name: Enforce Exit Code
+      shell: bash
+      run: |
+        if [ "${{ env.AUDIT_EXIT_CODE }}" -ne 0 ] && [ "${{ inputs.mode }}" = "enforce" ]; then
+          echo "::error::Sentinelis security audit failed in enforce mode."
+          exit ${{ env.AUDIT_EXIT_CODE }}
+        fi

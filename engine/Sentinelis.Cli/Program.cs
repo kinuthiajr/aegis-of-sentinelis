@@ -25,6 +25,13 @@ public static class Program
         // 1. Lightweight CLI Argument Parsing
         // to detect if the user invoked sentinelis trust. 
         // If they did, handle the command and exit before the auditing engine runs.
+
+        if (args.Length > 0 && (args[0] == "--version" || args[0] == "-v"))
+        {
+            Console.WriteLine("Sentinelis Security Auditor v1.0.0");
+            return 0; // Exit instantly without running config load or audit scan
+        }
+
         if (args.Length > 0 && args[0].ToLowerInvariant() == "trust")
         {
             if (args.Length < 2)
